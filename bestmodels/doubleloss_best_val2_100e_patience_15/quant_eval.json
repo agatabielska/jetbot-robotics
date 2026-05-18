@@ -1,0 +1,10 @@
+{
+  "original_onnx": "bestmodels/doubleloss_best_val2_100e_patience_15/best.onnx",
+  "quantized_onnx": "bestmodels/doubleloss_best_val2_100e_patience_15/quantized_best.onnx",
+  "original_acc": 0.7542372881355932,
+  "quantized_acc": 0.730225988700565,
+  "accuracy_delta": -0.02401129943502822,
+  "orig_median_batch_time": 0.8645855188369751,
+  "quant_median_batch_time": 1.1196844577789307,
+  "samples": 708
+}
