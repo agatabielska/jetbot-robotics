@@ -15,8 +15,10 @@ from torchvision.models import resnet18, ResNet18_Weights
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import tqdm
 import pandas as pd
+import time
 
-from utils.export_model import export_best_model_to_onnx
+from utils.export_model import export_run_onnx
+from utils.confusion import print_confusion_matrix
 
 
 # ---------------------------------------------------------------------------
@@ -301,11 +303,14 @@ def run_evaluation(
     running_loss = 0.0
     num_samples = 0
     label = f'Epoch {epoch} eval' if epoch is not None else 'Evaluating'
+    t_start = time.time()
 
     total_correct = 0
     total_seen = 0
     last_batch_out = None
     last_batch_gt = None
+    all_pred_cls: list[int] = []
+    all_gt_cls: list[int] = []
 
     with torch.no_grad():
         for imgs, labels in tqdm.tqdm(loader, desc=label, leave=False):
@@ -328,8 +333,14 @@ def run_evaluation(
             last_batch_out = val2_pred_vals
             last_batch_gt = labels
 
+            all_pred_cls.extend(pred_cls.cpu().tolist())
+            all_gt_cls.extend(gt_cls.cpu().tolist())
+
     avg_loss = running_loss / num_samples if num_samples > 0 else float('nan')
     acc = float(total_correct) / float(total_seen) if total_seen > 0 else 0.0
+
+    t_end = time.time()
+    print(f"Evaluation time: {t_end - t_start:.2f}s over {num_samples} samples")
 
     if print_samples and last_batch_out is not None:
         print(f"\n  {'Pred[0]':>10} {'Pred[1]':>10} {'GT[0]':>10} {'GT[1]':>10}")
@@ -341,6 +352,13 @@ def run_evaluation(
                 f" {last_batch_gt[i, 1].item():>10.4f}"
             )
 
+        # Print confusion matrix for val2 (map class idx 0->-1,1->0,2->1)
+        if len(all_pred_cls) > 0:
+            label_map = [-1, 0, 1]
+            y_pred_vals = [label_map[c] for c in all_pred_cls]
+            y_true_vals = [label_map[c] for c in all_gt_cls]
+            print_confusion_matrix(y_true_vals, y_pred_vals, labels=[-1, 0, 1], normalize=False)
+
     return avg_loss, acc
 
 
@@ -351,6 +369,10 @@ def run_evaluation(
 def train(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Device: {device}')
+    # Performance: enable cudnn autotuner when using fixed-size inputs on CUDA
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+    pin_memory = (device.type == 'cuda')
 
     train_transform = T.Compose([
         T.Resize(256),
@@ -399,6 +421,8 @@ def train(args):
         batch_size=args.batch_size,
         shuffle=True,
         num_workers=args.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(args.num_workers > 0),
     )
 
     # evaluation loader for train (no shuffling) to compute full-dataset metrics
@@ -407,6 +431,8 @@ def train(args):
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(args.num_workers > 0),
     )
 
     test_dir = os.path.join(os.path.dirname(args.data_dir.rstrip('/\\')), 'test')
@@ -426,6 +452,8 @@ def train(args):
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=(args.num_workers > 0),
     )
 
     # --- model ---
@@ -504,21 +532,22 @@ def train(args):
                 print(f'  Saved best model → {args.output}')
 
             if args.export_onnx:
-                export_paths = export_best_model_to_onnx(
+                export_paths = export_run_onnx(
                     model=model,
                     sample_input=torch.randn(1, 3, 224, 224, device=device),
+                    run_name=args.run_name,
+                    role='best',
                     test_transform=test_transform,
-                    best_epoch_metadata={
+                    metadata={
                         'best_epoch': epoch,
                         'best_test_loss': float(test_loss),
                         'best_test_accuracy': float(test_acc),
                         'train_loss_current_epoch': float(train_loss),
                     },
                     output_root=args.onnx_output_root,
-                    caller_file=__file__,
                     opset_version=args.onnx_opset,
                 )
-                print(f"  Exported ONNX → {export_paths['onnx_path']}")
+                print(f"  Exported best ONNX → {export_paths['onnx_path']}")
 
         if args.checkpoint:
             os.makedirs(args.checkpoint, exist_ok=True)
@@ -534,6 +563,22 @@ def train(args):
     print(f'\nTraining complete. Best test loss: {best_test_loss:.4f}')
     if best_epoch is not None and best_test_acc is not None:
         print(f'Best epoch: {best_epoch} | Best test accuracy: {best_test_acc * 100:.2f}%')
+    # export last-epoch model as well
+    if args.export_onnx:
+        export_paths = export_run_onnx(
+            model=model,
+            sample_input=torch.randn(1, 3, 224, 224, device=device),
+            run_name=args.run_name,
+            role='last',
+            test_transform=test_transform,
+            metadata={
+                'final_epoch': args.epochs,
+                'final_test_loss': float(best_test_loss),
+            },
+            output_root=args.onnx_output_root,
+            opset_version=args.onnx_opset,
+        )
+        print(f"Exported last-epoch ONNX → {export_paths['onnx_path']}")
 
 
 # ---------------------------------------------------------------------------
@@ -561,8 +606,10 @@ if __name__ == '__main__':
                         help='Export ONNX for each new best epoch (with transform + metadata sidecar files)')
     parser.add_argument('--onnx-output-root', type=str, default='bestmodels',
                         help='Root directory for ONNX exports and sidecar files')
-    parser.add_argument('--onnx-opset', type=int, default=17,
+    parser.add_argument('--onnx-opset', type=int, default=14,
                         help='ONNX opset version to use for export')
+    parser.add_argument('--run-name', type=str, default='run1',
+                        help='Run folder name under onnx output root (e.g. run1)')
     args = parser.parse_args()
 
     train(args)

@@ -163,3 +163,83 @@ def export_best_model_to_onnx(
 		"transform_path": str((sidecar_dir / "test_transform.json").resolve()),
 		"metadata_path": str((sidecar_dir / "best_epoch_metadata.json").resolve()),
 	}
+
+
+def export_run_onnx(
+	model: torch.nn.Module,
+	sample_input: torch.Tensor | tuple[torch.Tensor, ...],
+	run_name: str = "run1",
+	role: str = "best",  # 'best' or 'last'
+	test_transform: Any | None = None,
+	metadata: dict[str, Any] | None = None,
+	output_root: str | Path = "bestmodels",
+	opset_version: int = 17,
+	dynamic_batch: bool = True,
+) -> dict[str, str]:
+	"""Export ONNX inside a run folder and save role-specific sidecars.
+
+	Files written:
+	  - <output_root>/<run_name>/best.onnx  (if role=='best')
+	  - <output_root>/<run_name>/last.onnx  (if role=='last')
+	  - <output_root>/<run_name>/{role}_test_transform.json
+	  - <output_root>/<run_name>/{role}_metadata.json
+	"""
+	run_dir = Path(output_root) / run_name
+	run_dir.mkdir(parents=True, exist_ok=True)
+
+	filename = "best.onnx" if role == "best" else "last.onnx"
+	onnx_path = run_dir / filename
+
+	model.eval()
+
+	# prepare input and names (same logic as export_best_model_to_onnx)
+	if isinstance(sample_input, tuple):
+		input_names = [f"input_{i}" for i in range(len(sample_input))]
+		export_input = sample_input
+	else:
+		input_names = ["input"]
+		export_input = sample_input
+
+	with torch.no_grad():
+		model_out = model(*export_input) if isinstance(export_input, tuple) else model(export_input)
+
+	if isinstance(model_out, (tuple, list)):
+		output_names = [f"output_{i}" for i in range(len(model_out))]
+	else:
+		output_names = ["output"]
+
+	dynamic_axes = {name: {0: "batch"} for name in input_names} if dynamic_batch else None
+	if dynamic_axes is not None:
+		for name in output_names:
+			dynamic_axes[name] = {0: "batch"}
+
+	torch.onnx.export(
+		model,
+		export_input,
+		f=onnx_path,
+		export_params=True,
+		do_constant_folding=True,
+		opset_version=opset_version,
+		input_names=input_names,
+		output_names=output_names,
+		dynamic_axes=dynamic_axes,
+	)
+
+	# sidecar files
+	transform_payload = {
+		"saved_at": datetime.now().isoformat(timespec="seconds"),
+		"test_transform": _to_json_compatible(test_transform),
+	}
+	_write_json(run_dir / f"{role}_test_transform.json", transform_payload)
+
+	metadata_payload = {
+		"saved_at": datetime.now().isoformat(timespec="seconds"),
+		"metadata": _to_json_compatible(metadata or {}),
+	}
+	_write_json(run_dir / f"{role}_metadata.json", metadata_payload)
+
+	return {
+		"onnx_path": str(onnx_path.resolve()),
+		"transform_path": str((run_dir / f"{role}_test_transform.json").resolve()),
+		"metadata_path": str((run_dir / f"{role}_metadata.json").resolve()),
+	}
