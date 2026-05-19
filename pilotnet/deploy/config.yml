@@ -1,0 +1,21 @@
+# Absolute or relative path to the ONNX model. Default: model.onnx is a
+# sibling of drive.py, so the relative path resolves to that file.
+model:
+  path: './model.onnx'
+
+# JetBot calibration. The differential coefficients are PER-VEHICLE and
+# MUST be set before the bot will drive. Defaults are 1.0/1.0 (symmetric)
+# but most lab JetBots are slightly asymmetric — see README.md for the
+# per-bot lookup table.
+robot:
+  max_speed: 0.22
+  max_steering: 0.5
+  differential:
+    left: 1.0
+    right: 1.0
+
+# Inference-time throttle clamp. The model's predicted forward signal is
+# raised to at least this value so the bot doesn't crawl. Bump higher if
+# the bot moves too slowly; lower if it's twitchy.
+drive:
+  forward_floor: 0.5

@@ -4,3 +4,17 @@ runs
 tmp
 __pycache__/
 *.pyc
+
+# dataset (195 MB) — keep out of repo
+data
+data/
+**/data/
+
+# virtualenvs (multi-GB)
+.venv/
+venv/
+
+# documentation files (REPORT.md, NOTES.md, deploy/README.md, ...)
+# Already-tracked README.md files in team folders are NOT affected by
+# this rule — gitignore only blocks new untracked files from being added.
+*.md
