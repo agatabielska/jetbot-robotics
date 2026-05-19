@@ -6,10 +6,6 @@ import onnxruntime as rt
 from pathlib import Path
 import yaml
 import numpy as np
-import torch
-import torch.nn as nn
-from torchvision import transforms
-from torchvision.models import resnet18, ResNet18_Weights
 
 from PUTDriver import PUTDriver, gstreamer_pipeline
 
@@ -23,44 +19,12 @@ class BottomHalfResize:
         self.fraction = fraction
         self.size = size
 
-    def __call__(self, img: Image.Image) -> Image.Image:
-        w, h = img.size
+    def __call__(self, img: np.ndarray) -> np.ndarray:
+        h, w = img.shape[:2]
         top = int(h * (1.0 - self.fraction))
-        return img.crop((0, top, w, h)).resize((self.size, self.size), Image.BILINEAR)
-
-
-class DualHeadResNet(nn.Module):
-    """ResNet18 backbone with two separate heads:
-      - head_val1: regression → tanh output in (-1, 1)
-      - head_val2: 3-class classifier → {-1, 0, +1}
-    """
-
-    def __init__(self, pretrained: bool = True, dropout: float = 0.5):
-        super().__init__()
-        backbone = resnet18(weights=ResNet18_Weights.DEFAULT if pretrained else None)
-        in_features = backbone.fc.in_features  # 512
-        self.backbone = nn.Sequential(*list(backbone.children())[:-1])  # drop fc
-
-        self.head_val1 = nn.Sequential(
-            nn.Linear(in_features, 256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 1),
-            nn.Tanh(),
-        )
-        self.head_val2 = nn.Sequential(
-            nn.Linear(in_features, 256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 3),  # logits for classes: -1, 0, +1
-        )
-
-    def forward(self, x: torch.Tensor):
-        feat = self.backbone(x).flatten(1)      # (B, 512)
-        val1 = self.head_val1(feat).squeeze(1)  # (B,)
-        val2_logits = self.head_val2(feat)       # (B, 3)
-        return val1, val2_logits
-   
+        cropped = img[top:h, 0:w]
+        resized = cv2.resize(cropped, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
+        return resized
 
 
 class AI:
@@ -72,33 +36,37 @@ class AI:
         self.output_name = self.sess.get_outputs()[0].name
         self.input_name = self.sess.get_inputs()[0].name
         
-        # Initialize transforms
-        self.transform = transforms.Compose([
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
-            BottomHalfResize(fraction=0.7, size=224),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.485, 0.456, 0.406],
-                std=[0.229, 0.224, 0.225]
-            )
-        ])
+        # Store normalization parameters
+        self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+        self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+        
+        # Initialize transform pipeline
+        self.bottom_half_resize = BottomHalfResize(fraction=0.7, size=224)
 
     def preprocess(self, img: np.ndarray) -> np.ndarray:
-        ##TODO: preprocess your input image, remember that img is in BGR channels order
-        # Convert BGR to RGB for torchvision transforms
+                # Convert BGR to RGB
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         
-        # Convert numpy array to PIL Image for transforms
-        img_pil = Image.fromarray(img_rgb)
+        # Resize to 256 (bilinear)
+        img_256 = cv2.resize(img_rgb, (256, 256), interpolation=cv2.INTER_LINEAR)
         
-        # Apply transforms
-        img_tensor = self.transform(img_pil)
+        # Apply BottomHalfResize
+        img_cropped_resized = self.bottom_half_resize(img_256)
         
-        # Add batch dimension and convert to numpy
-        img_tensor = img_tensor.unsqueeze(0)
-        img_np = img_tensor.numpy().astype(np.float32)
+        # Convert to float32 and normalize to [0, 1]
+        img_float = img_cropped_resized.astype(np.float32) / 255.0
         
-        return img_np
+        # Convert from HWC to CHW (for ONNX model)
+        #TODO check if this line is important
+        img_chw = np.transpose(img_float, (2, 0, 1))
+        
+        # Normalize with mean and std
+        img_normalized = (img_chw - self.mean[:, np.newaxis, np.newaxis]) / self.std[:, np.newaxis, np.newaxis]
+        
+        # Add batch dimension
+        img_tensor = np.expand_dims(img_normalized, axis=0)
+        
+        return img_tensor.astype(np.float32)
 
     def postprocess(self, detections: tuple) -> np.ndarray:
         """Process dual head outputs: (val1, val2_logits) → (forward, left)

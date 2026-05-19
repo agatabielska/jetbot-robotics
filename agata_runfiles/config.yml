@@ -2,8 +2,8 @@ model:
   path: 'bestmodels/doubleloss_best_val2_100e/best.onnx'
 
 robot:
-  max_speed: 1.0
-  max_steering: 1
-  differential:
-    left: 0.0
-    right: 0.0
+  max_speed: 0.15
+  max_steering: 0.55
+  differential: #TODO to jesli na wprost nie jedzie prosto ig
+    left: 1.0
+    right: 1.0
