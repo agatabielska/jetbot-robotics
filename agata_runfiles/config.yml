@@ -1,0 +1,9 @@
+model:
+  path: 'bestmodels/doubleloss_best_val2_100e/best.onnx'
+
+robot:
+  max_speed: 1.0
+  max_steering: 1
+  differential:
+    left: 0.0
+    right: 0.0
