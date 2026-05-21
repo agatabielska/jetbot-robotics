@@ -1,0 +1,9 @@
+model:
+  path: '/home/jetbot/jetbot-robotics-main/resized-no-augmented-jetbot/experiments/shuffle_96/jetbot_shufflenet_96.onnx'
+
+robot:
+  max_speed: 0.2
+  max_steering: 0.7
+  differential:
+    left: 1.0
+    right: 1.0
