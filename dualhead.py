@@ -31,7 +31,7 @@ class DualHeadResNet(nn.Module):
       - head_val2: 3-class classifier → {-1, 0, +1}
     """
 
-    def __init__(self, pretrained: bool = True, dropout: float = 0.3):
+    def __init__(self, pretrained: bool = True, dropout: float = 0.5):
         super().__init__()
         backbone = resnet18(weights=ResNet18_Weights.DEFAULT if pretrained else None)
         in_features = backbone.fc.in_features  # 512
@@ -208,6 +208,7 @@ class BalancedOversampledDataset(Dataset):
         self.transform = base_dataset.transform
         self.img_type = base_dataset.img_type
         self.flip_augment = base_dataset.flip_augment
+        self.flipper = base_dataset.flipper  # reuse the same flipper instance
 
         # collect samples per class
         buckets = { -1: [], 0: [], 1: [] }
@@ -250,7 +251,7 @@ class BalancedOversampledDataset(Dataset):
         targets = torch.tensor(targets, dtype=torch.float32)
 
         if self.flip_augment:
-            image, targets = RandomHorizontalFlipWithLabel()(image, targets)
+            image, targets = self.flipper(image, targets)
 
         if self.transform:
             image = self.transform(image)
@@ -316,6 +317,7 @@ def run_evaluation(
         for imgs, labels in tqdm.tqdm(loader, desc=label, leave=False):
             imgs = imgs.to(device)
             labels = labels.to(device)
+            labels = smooth_labels(labels, eps=0.05)  # consistent with training loss scale
 
             val1_pred, val2_logits = model(imgs)
             loss = criterion(val1_pred, val2_logits, labels)
@@ -376,14 +378,17 @@ def train(args):
 
     train_transform = T.Compose([
         T.Resize(256),
-        T.CenterCrop(224),
+        BottomHalfResize(fraction=args.crop_fraction, size=224),
+        # Geometric augmentation: prevents spatial memorization
+        T.RandomRotation(degrees=15),
+        T.RandomPerspective(distortion_scale=0.1, p=0.15),
+        # Colour augmentation
         T.RandomApply([
             T.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.15),
         ], p=0.5),
-        
         T.RandomApply([
-        T.GaussianBlur(kernel_size=5, sigma=(0.1, 1.0))
-        ], p=0.5),
+            T.GaussianBlur(kernel_size=5, sigma=(0.1, 1.0)),
+        ], p=0.3),
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
         T.RandomErasing(p=0.2, scale=(0.02, 0.1)),
@@ -391,7 +396,7 @@ def train(args):
 
     test_transform = T.Compose([
         T.Resize(256),
-        T.CenterCrop(224),
+        BottomHalfResize(fraction=args.crop_fraction, size=224),
         T.ToTensor(),
         T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
     ])
@@ -447,9 +452,11 @@ def train(args):
         flip_augment=False,
     )
     print(f'Test samples: {len(test_dataset)}')
+    # Use larger batch size for evaluation (no backprop, so memory is not constrained)
+    eval_batch_size = min(256, args.batch_size * 4)
     test_loader = DataLoader(
         test_dataset,
-        batch_size=args.batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=pin_memory,
@@ -470,7 +477,7 @@ def train(args):
 
     best_test_loss = float('inf')
     best_epoch = None
-    best_test_acc = None
+    best_test_acc = float('-inf')
 
     for epoch in range(1, args.epochs + 1):
 
@@ -499,30 +506,43 @@ def train(args):
             running_loss += loss.item() * imgs.size(0)
             loop.set_postfix(loss=running_loss / ((loop.n + 1) * args.batch_size))
 
-        train_loss = running_loss / len(train_dataset)
+        train_loss_loop = running_loss / len(train_dataset)
 
         # --- evaluate on test and train sets ---
-        test_loss, test_acc = run_evaluation(model, test_loader, criterion, device, epoch, print_samples=True)
-        if epoch == 1 or epoch % 5 == 0:
+        # Always evaluate train with no-grad / eval mode for a fair comparison with test loss
+        if not args.skip_train_eval:
             train_loss_eval, train_acc = run_evaluation(model, train_eval_loader, criterion, device, epoch, print_samples=False)
+        else:
+            train_loss_eval, train_acc = float('nan'), float('-inf')
+        
+        test_loss, test_acc = run_evaluation(model, test_loader, criterion, device, epoch, print_samples=(not args.no_confusion))
+        if not args.skip_train_eval:
             print(f"  val2 accuracy - train: {train_acc * 100:.2f}%, test: {test_acc * 100:.2f}%")
-
-
+        else:
+            print(f"  val2 accuracy - test: {test_acc * 100:.2f}%")
         # step scheduler based on validation loss
         try:
             scheduler.step(test_loss)
         except Exception:
             pass
 
-        is_best = test_loss < best_test_loss
+        is_best = test_acc > best_test_acc
 
-        print(
-            f'Epoch {epoch:>3}  train_loss={train_loss:.4f}  test_loss={test_loss:.4f}'
-            + (' ← best' if is_best else '')
-        )
-
-        # Print val2 classification accuracy over full datasets
-
+        # Use train_loss_eval (eval-mode, consistent with test_loss) for the gap metric
+        if not args.skip_train_eval:
+            gap = train_loss_eval - test_loss
+            print(
+                f'Epoch {epoch:>3}  train_loss(loop)={train_loss_loop:.4f}  '
+                f'train_loss(eval)={train_loss_eval:.4f}  test_loss={test_loss:.4f}  '
+                f'gap={gap:+.4f}'
+                + (' ← best' if is_best else '')
+            )
+        else:
+            print(
+                f'Epoch {epoch:>3}  train_loss(loop)={train_loss_loop:.4f}  '
+                f'test_loss={test_loss:.4f}'
+                + (' ← best' if is_best else '')
+            )
         if is_best:
             best_test_loss = test_loss
             best_epoch = epoch
@@ -542,7 +562,7 @@ def train(args):
                         'best_epoch': epoch,
                         'best_test_loss': float(test_loss),
                         'best_test_accuracy': float(test_acc),
-                        'train_loss_current_epoch': float(train_loss),
+                        'train_loss_current_epoch': float(train_loss_eval),
                     },
                     output_root=args.onnx_output_root,
                     opset_version=args.onnx_opset,
@@ -556,7 +576,7 @@ def train(args):
                 'epoch': epoch,
                 'model_state': model.state_dict(),
                 'optimizer_state': optimizer.state_dict(),
-                'train_loss': train_loss,
+                'train_loss': train_loss_eval if not args.skip_train_eval else train_loss_loop,
                 'test_loss': test_loss,
             }, ckpt_path)
 
@@ -584,21 +604,35 @@ def train(args):
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+class BottomHalfResize:
+    """Crop the bottom `fraction` of the image (full width), then resize to `size`×`size`.
+
+    Keeps road/track information and discards uninformative sky/ceiling.
+    """
+    def __init__(self, fraction: float = 0.5, size: int = 224):
+        self.fraction = fraction
+        self.size = size
+
+    def __call__(self, img: Image.Image) -> Image.Image:
+        w, h = img.size
+        top = int(h * (1.0 - self.fraction))
+        return img.crop((0, top, w, h)).resize((self.size, self.size), Image.BILINEAR)
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data-dir',      type=str,   default='put_jetbot_dataset/dataset/train',
                         help='Path to train folder; test folder inferred as adjacent "test" dir')
-    parser.add_argument('--epochs',        type=int,   default=25)
+    parser.add_argument('--epochs',        type=int,   default=30)
     parser.add_argument('--batch-size',    type=int,   default=64)
     parser.add_argument('--lr',            type=float, default=1e-4)
-    parser.add_argument('--dropout',       type=float, default=0.3)
-    parser.add_argument('--weight-decay',  type=float, default=1e-4, help='Weight decay for AdamW')
+    parser.add_argument('--dropout',       type=float, default=0.5)
+    parser.add_argument('--weight-decay',  type=float, default=1e-2, help='Weight decay for AdamW')
     parser.add_argument('--scheduler-factor', type=float, default=0.3, help='ReduceLROnPlateau factor')
     parser.add_argument('--scheduler-patience', type=int, default=2, help='ReduceLROnPlateau patience')
     parser.add_argument('--target-per-class', type=int, default=4000, help='If >0, up/down-sample train set to this many samples per val2 class')
     parser.add_argument('--num-workers',   type=int,   default=4)
-    parser.add_argument('--freeze-epochs', type=int,   default=0,
+    parser.add_argument('--freeze-epochs', type=int,   default=5,
                         help='Freeze backbone for this many epochs before unfreezing')
     parser.add_argument('--output',        type=str,   help='Path to save best model state dict')
     parser.add_argument('--checkpoint',    type=str,   help='Directory to save per-epoch checkpoints')
@@ -610,6 +644,12 @@ if __name__ == '__main__':
                         help='ONNX opset version to use for export')
     parser.add_argument('--run-name', type=str, default='run1',
                         help='Run folder name under onnx output root (e.g. run1)')
+    parser.add_argument('--skip-train-eval', action='store_true',
+                        help='Skip train set evaluation to speed up training (only evaluate test set)')
+    parser.add_argument('--no-confusion', action='store_true',
+                        help='Skip confusion matrix printing (speeds up eval output)')
+    parser.add_argument('--crop-fraction',      type=float, default=0.7,
+                        help='Bottom fraction of image to keep (0.4–0.6 recommended)')
     args = parser.parse_args()
 
     train(args)
