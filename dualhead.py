@@ -640,7 +640,7 @@ if __name__ == '__main__':
                         help='Export ONNX for each new best epoch (with transform + metadata sidecar files)')
     parser.add_argument('--onnx-output-root', type=str, default='bestmodels',
                         help='Root directory for ONNX exports and sidecar files')
-    parser.add_argument('--onnx-opset', type=int, default=14,
+    parser.add_argument('--onnx-opset', type=int, default=11,
                         help='ONNX opset version to use for export')
     parser.add_argument('--run-name', type=str, default='run1',
                         help='Run folder name under onnx output root (e.g. run1)')

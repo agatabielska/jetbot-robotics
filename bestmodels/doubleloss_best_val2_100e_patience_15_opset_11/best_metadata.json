@@ -1,0 +1,9 @@
+{
+  "saved_at": "2026-05-25T12:48:58",
+  "metadata": {
+    "best_epoch": 88,
+    "best_test_loss": 1.2761497133354824,
+    "best_test_accuracy": 0.7779349363507779,
+    "train_loss_current_epoch": NaN
+  }
+}
