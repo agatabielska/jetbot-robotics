@@ -1,5 +1,5 @@
 model:
-  path: '/home/jetbot/jetbot-robotics-main/resized-no-augmented-jetbot/experiments/shuffle_96/jetbot_shufflenet_96.onnx'
+  path: '/home/olek/sem6/robotics2/jetbot-robotics/resized-no-augmented-jetbot/experiments/shuffle_96/jetbot_shufflenet_96.onnx'
 
 robot:
   max_speed: 0.2
@@ -7,3 +7,5 @@ robot:
   differential:
     left: 1.0
     right: 1.0
+  latency_frames: 0   # 0 = act on current frame; N = act on prediction from N frames ago
+  avg_frames: 1       # average this many oldest ready predictions (1 = no averaging)
