@@ -1,0 +1,13 @@
+# Empiryczne defaulty z 1. wyścigu (zwalidowane na działającym shufflenet drużynowym).
+# Tune na labie: edytuj wartości lub wyzeruj inference.ema_alpha = 1.0 (raw output, brak smoothingu).
+model:
+  path: ''   # left for compatibility; bot_driving.py auto-loads ./best.onnx
+robot:
+  max_speed: 0.20      # zwalidowany maks. na shufflenet drużynowym. Zwiększ ~0.25 jeśli za wolny.
+  max_steering: 0.7    # zwalidowany maks. na shufflenet drużynowym. Zmniejsz ~0.5 jeśli za agresywny.
+  differential:        # uruchom `calibration/setup_differential.py --jetbot N` żeby ustawić preset
+    left: 1.00         # albo `calibration/calibrate.py` dla interaktywnej kalibracji
+    right: 1.00
+inference:
+  ema_alpha: 0.3       # EMA smoothing alpha. 0.3=mocne wyg., 0.5=średnie, 1.0=raw (brak EMA).
+                       # Tunable na labie BEZ retreningu. Adresuje zygzak na prostych.
