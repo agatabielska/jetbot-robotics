@@ -32,10 +32,13 @@ class AI:
         self.path = config['model']['path']
 
         self.sess = rt.InferenceSession(self.path, providers=['TensorrtExecutionProvider', 'CUDAExecutionProvider', 'CPUExecutionProvider'])
- 
-        self.output_name = self.sess.get_outputs()[0].name
+
+        self.output_names = [o.name for o in self.sess.get_outputs()]
+
+        for o in self.sess.get_outputs():
+            print(o.name, o.shape, o.type)
         self.input_name = self.sess.get_inputs()[0].name
-        
+
         # Store normalization parameters
         self.mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
         self.std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -96,19 +99,20 @@ class AI:
         assert inputs.dtype == np.float32
         assert inputs.shape == (1, 3, 224, 224)
         
-        detections = self.sess.run([self.output_name], {self.input_name: inputs})[0]
+        detections = self.sess.run(self.output_names, {self.input_name: inputs})
         outputs = self.postprocess(detections)
-
+        outputs[0] = max(-1.0, min(outputs[0], 1.0))
+        outputs[1] = max(-1.0, min(outputs[1], 1.0))
         assert outputs.dtype == np.float32
         assert outputs.shape == (2,)
-        assert outputs.max() < 1.0
-        assert outputs.min() > -1.0
+        assert outputs.max() <= 1.0
+        assert outputs.min() >= -1.0
 
         return outputs
 
 
 def main():
-    with open("config.yml", "r") as stream:
+    with open("agata_runfiles/config.yml", "r") as stream:
         try:
             config = yaml.safe_load(stream)
         except yaml.YAMLError as exc:
@@ -143,3 +147,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+jetbot@jetso
