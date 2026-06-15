@@ -10,6 +10,7 @@
 Our best-performing architecture is a fine-tuned **ShuffleNetV2 ×0.5** pretrained on ImageNet, implemented in `src/jetbot_models.py` as `ShuffleNetDriver`.
 
 ### Architecture
+ImageNet is widely known dataset for classification problems. However, reaching the goal of the problem requires regression, so this is why we have changed the head to achieve the goal.
 
 ```
 Input: 96×96 RGB image
@@ -23,6 +24,7 @@ ShuffleNetV2 ×0.5 backbone (pretrained, ImageNet)
   │  Conv5:    1×1 conv            → 1024 channels
   │
   ▼
+START OF OUR CHANGES
 AdaptiveAvgPool2d(1)   # global average pooling → (1024,)
   │
   ▼
@@ -37,7 +39,19 @@ Tanh                   # outputs in [-1, 1]
 Output: [forward, left]
 ```
 
-Each ShuffleNet unit splits its input channels in half, processes one half through depthwise separable convolutions, then concatenates and shuffles channels across groups — keeping computation low while preserving cross-channel information flow.
+### Quick explanation of ShuffleNet units
+
+<div align="center">
+  <img src="img/shufflenet.png" alt="ShuffleNetV2 diagram" />
+</div>
+
+What: It is an ultra-lightweight convolutional block that utilizes a channel split to divide input features into two parallel paths before merging them. For our JetBot, this serves as the foundational backbone that processes live camera frames to predict driving commands.
+
+Why: We use it because standard architectures suffer from high inference latency on edge hardware due to heavy memory operations. ShuffleNet v2 minimizes this overhead, ensuring our robot achieves real-time, low-latency inference for immediate steering corrections.
+
+How: At each ShuffleNet block, half of the channels bypass computation as a structural shortcut, while the other half undergoes efficient depthwise separable convolutions. The paths are then concatenated and mixed via a channel shuffle, keeping computational costs exceptionally low while maximizing cross-channel information flow.
+
+Used architecture allowed us to have a solid baseline, over which we later experimented to improve it even more (by, for instance, frame delaying with mean or annotation of data)
 
 ### Key properties
 
@@ -54,6 +68,16 @@ Each ShuffleNet unit splits its input channels in half, processes one half throu
 | Dropout | 0.3 (head only) |
 | Export | ONNX opset 11 |
 
+### Why huber loss and not textbook MSE/MAE?
+
+<div align="center">
+  <img src="img/huber.png" alt="ShuffleNetV2 diagram" />
+</div>
+
+Huber loss is a hybrid function. It takes a param delta and in set and for values -delta, delta applies MSE, otherwise MAE. 
+Such combination allows to have smooth function, which later results in smoother robot behaviour while perserving meaningfullness of the cost yield by different estimations and outlier robustness.
+
+
 ### Training data
 
 The model was first trained on the default course dataset (`put_jetbot_dataset/`). We then re-trained it on our own annotated data — `dataset_annotated_initial` (annotated the previous week) and `dataset_annotated_final` (annotated for the final class session). Models from both annotation rounds are kept in `models/` for comparison.
@@ -61,6 +85,19 @@ The model was first trained on the default course dataset (`put_jetbot_dataset/`
 ### Anti-bias: horizontal flip
 
 The recorded driving data has an inherent left-turn bias due to the track layout. To counteract this, half of the training samples are horizontally flipped, with the `left` label sign negated accordingly. This artificially balances the left/right turn distribution without requiring additional data collection.
+
+### Issues and how we faced them
+
+#### Robot turning too fast
+
+When we initially tested our baseline working solution, quickly we had noticed that our jetbot begins the turning process even before it enter it.
+Our initial idea: Make the turning happen later and only when it definitely should be applied.
+To achieve so, we decided to delay the robot making turn by a parametrized number of frames. Furthermore, average outcomes of parametrized number of function, to make the robot turn only if it is confident of doing so.
+Nevertheless, we still wanted to make our model better.
+
+#### Robot zig-zagging
+
+When being on straight path, our model performed little turns. The cause of such behaviour is, by our thoughts, the delay caused by joystick when annotating data. This is why our hero, name of other groups in the lab, fought hard to re-annotate the data by hand. Initial experiment performed last week showed that the model indeed stopped zig-zagging, although by small algorithmical mistake it still was not perfect. As we have a lot of faith in the idea, we believe that today we will succeed with this extremely time consuming improvement and reach personal best time.
 
 ### Deployment
 
@@ -94,7 +131,13 @@ Standard ImageNet pretrained ResNet18 with a custom regression head (Linear → 
 
 ---
 
-### 2. Dual-Head ResNet18 - Classification + Regression
+### 2. Classification introduced
+
+Having the data explored, we noticed that only minority of the turn data is not in set {-1, 0, 1}. This is why we decided to experiment with possible architectures even more, introducing two solutions based on that (and pretrained ResNet).
+
+#### 2.1 Dual-Head ResNet18 - Classification + Regression
+
+First architecture involved classification on turning parameter and regression on front.
 
 **Path**: `experiments/dualhead.py`
 
@@ -113,7 +156,9 @@ ResNet18 backbone with two separate heads:
 
 ---
 
-### 3. Dual Classifier - ResNet18, Speed + Turn Both as Classes
+#### 2.2 Dual Classifier - ResNet18, Speed + Turn Both as Classes
+
+Second classification model involded double classifier - both for turning and moving front. To make the data able to classify, data was binned.
 
 **Path**: `experiments/dualclassifer.py`
 
@@ -130,9 +175,13 @@ Both outputs treated as classification problems:
 | Anti-bias | Inverse-frequency class weighting for both heads |
 | Loss | CrossEntropy × 2 |
 
+#### Problems with above two solutions
+
+Even though the idea was to simplify the problem, it did not perform good, as it was clear to us that the intermediate values that would be returned for regression, were significant in terms of model performance, even if they were not present in training data. Lack of those values led to jetbot not being able to go back on track, when it turned a little when going front. 
+
 ---
 
-### 4. Custom PilotNet
+### 3. Custom PilotNet
 
 **Path**: `experiments/Kacper-Solution/`
 
@@ -149,7 +198,7 @@ Custom PilotNet-inspired architecture:
 
 ---
 
-### 5. PilotNet - Original NVIDIA Architecture
+### 4. PilotNet - Original NVIDIA Architecture
 
 **Path**: `experiments/pilotnet/`
 
@@ -165,7 +214,7 @@ Faithful NVIDIA PilotNet implementation:
 
 ---
 
-### 6. 6 Variants of PilotNet-style backbone
+### 5. 6 Variants of PilotNet-style backbone
 
 **Path**: `experiments/jakub_second_race/`
 
@@ -184,7 +233,7 @@ All use WeightedRandomSampler on 7 `|left|` bins (except `dualhead_class_reg` wh
 
 ---
 
-### 7. Other models
+### 6. Other models
 
 **Path**: `experiments/jetbot_racing_bundle/`
 
@@ -199,7 +248,7 @@ All use WeightedRandomSampler on 7 `|left|` bins (except `dualhead_class_reg` wh
 
 All: lr=1e-3, AdamW, cosine schedule, batch_size=64, epochs=50, early stopping patience=10.
 
-### 8. ShuffleNetV2 with heavy augmentation
+### 7. ShuffleNetV2 with heavy augmentation
 
 **Path**: `experiments/resized-jetbot/`
 
@@ -218,7 +267,7 @@ Despite the richer augmentation, this variant achieved **lower performance** tha
 
 ---
 
-### 9. TinyCNN
+### 8. TinyCNN
 
 **Path**: `src/jetbot_models.py`
 
@@ -240,7 +289,7 @@ Fastest of the three models in `src/`, but without pretrained features it requir
 
 ---
 
-### 10. MobileNetV2
+### 9. MobileNetV2
 
 **Path**: `src/jetbot_models.py`
 
@@ -262,7 +311,7 @@ Highest parameter count of the three `src/` models. Best raw accuracy but slower
 
 ---
 
-### 11. Pure computer vision approach
+### 10. Pure computer vision approach
 
 Attempt to implement only binary thresholding and morphological operations in order to find the 
 center of the road. It was not great enough to be included in experiments in final repo.
