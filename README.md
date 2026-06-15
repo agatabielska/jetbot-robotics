@@ -33,7 +33,7 @@ Dataset directories are excluded from the repository (`.gitignore`). There are t
 
 **Annotated datasets** — versions of the data annotated by us using [data-annotation.ipynb](data-annotation.ipynb). 
 
-Available here:
+Available [here](https://drive.google.com/drive/folders/1GUi_b3LJ-y4BEhcQb2xYh7fnYyso9Zgp?usp=sharing).
 
 - `dataset_annotated_initial/` — first annotation pass, created the previous week.
 - `dataset_annotated_final/` — annotation created for the final class session. We don't know what will be the results on this data yet.
