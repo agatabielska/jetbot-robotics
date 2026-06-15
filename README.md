@@ -1,1 +1,75 @@
 # jetbot-robotics
+
+Imitation-learning pipeline for the JetBot racing task. A model is trained to predict `(forward, left)` control signals from camera frames and deployed on the robot via ONNX Runtime.
+
+## Setup
+
+```bash
+uv sync
+```
+
+## Directory structure
+
+```
+dataset_annotated_final/   # training data (images + CSV labels) — not in repo, see below
+dataset_annotated_initial/ # first annotated version — not in repo, see below
+put_jetbot_dataset/        # raw course dataset — not in repo, see below
+
+models/
+  output/                  # checkpoints and ONNX files written here by default
+  experiments/             # models trained on basic data
+  initial-own-data/        # models trained on initial own annotated dataset
+
+src/                       # training and on-robot scripts
+
+experiments/               # all not that succesfull approaches, do not enter if you are pedantic
+```
+
+## Datasets
+
+Dataset directories are excluded from the repository (`.gitignore`). There are three sources of data:
+
+**Course dataset** (`put_jetbot_dataset/`) — the default dataset provided for the course.
+
+**Annotated datasets** — versions of the data annotated by us using [data-annotation.ipynb](data-annotation.ipynb). 
+
+Available here:
+
+- `dataset_annotated_initial/` — first annotation pass, created the previous week.
+- `dataset_annotated_final/` — annotation created for the final class session. We don't know what will be the results on this data yet.
+
+To use a specific dataset, pass `--dataset` to the training script.
+
+## Training
+
+Run from the `src/` directory:
+
+```bash
+cd src
+
+# Default: shufflenet, 96×96, 50 epochs, dataset at ../dataset_annotated_final
+python train.py
+
+# Override any argument
+python train.py --model mobilenet --epochs 40 --lr 3e-4
+python train.py --model tiny --epochs 30
+python train.py --dataset /path/to/custom/dataset --out-dir /path/to/output
+```
+
+The best checkpoint is saved to `../models/output/best_<model>.pt` and an ONNX file is exported automatically at the end.
+
+
+
+## On-robot deployment
+
+Edit the `model.path` in the appropriate config file to point to the exported `.onnx` model, then run the driving script from `src/`:
+
+```bash
+# Minimal driver
+python bot_driving.py
+
+# Fixed-delay + averaging
+python bot-driving-najlepsze.py   # uses config-najlepsze.yml
+```
+
+Robot parameters (`max_speed`, `max_steering`, latency compensation, etc.) are configured in the corresponding `.yml` file. We have 4 different bot_driving files, during last class we will choose the best one.

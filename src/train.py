@@ -4,9 +4,10 @@ JetBot Training Script
 Trains a regression model to predict (forward, left) from camera images.
 
 Usage:
-    python train.py --dataset ./dataset --model tiny --img-size 96 --epochs 30
-    python train.py --dataset ./dataset --model mobilenet --img-size 96 --epochs 40 --lr 3e-4
-    python train.py --dataset ./dataset --model shufflenet --img-size 96 --epochs 35
+    python train.py
+    python train.py --dataset ../dataset_annotated_final --model shufflenet --img-size 96 --epochs 35
+    python train.py --dataset ../dataset_annotated_final --model mobilenet --img-size 96 --epochs 40 --lr 3e-4
+    python train.py --dataset ../dataset_annotated_final --model tiny --img-size 96 --epochs 30
 
 After training, a .onnx file is exported automatically.
 """
@@ -118,10 +119,10 @@ def export_onnx(model, img_size: int, out_path: str, device):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--dataset",       default="dataset",     help="Path to dataset/ folder")
-    p.add_argument("--model",         default="tiny",        choices=["tiny", "mobilenet", "shufflenet"])
+    p.add_argument("--dataset",       default="../dataset_annotated_final", help="Path to dataset/ folder")
+    p.add_argument("--model",         default="shufflenet",  choices=["tiny", "mobilenet", "shufflenet"])
     p.add_argument("--img-size",      type=int, default=96)
-    p.add_argument("--epochs",        type=int, default=30)
+    p.add_argument("--epochs",        type=int, default=50)
     p.add_argument("--batch-size",    type=int, default=64)
     p.add_argument("--lr",            type=float, default=1e-3)
     p.add_argument("--weight-decay",  type=float, default=1e-4)
@@ -131,7 +132,7 @@ def parse_args():
                    help="Predict control signals N frames ahead (latency compensation)")
     p.add_argument("--dropout",       type=float, default=0.3)
     p.add_argument("--num-workers",   type=int,   default=4)
-    p.add_argument("--out-dir",       default="checkpoints")
+    p.add_argument("--out-dir",       default="../models/output")
     p.add_argument("--loss",          default="huber", choices=["mse", "huber", "mae"])
     return p.parse_args()
 

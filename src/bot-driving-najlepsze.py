@@ -42,7 +42,7 @@ class AI:
 
 
 def main():
-    with open("config.yml", "r") as stream:
+    with open("config-najlepsze.yml", "r") as stream:
         try:
             config = yaml.safe_load(stream)
         except yaml.YAMLError as exc:

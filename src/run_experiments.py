@@ -16,10 +16,10 @@ import os
 
 EXPERIMENTS = [
     # (name,          model,        img_size, epochs, lr,    future_offset)
-    ("tiny_96",       "tiny",       96,       30,     1e-3,  0),
-    ("tiny_96_f2",    "tiny",       96,       30,     1e-3,  2),   # 2-frame lookahead
-    ("shuffle_96",    "shufflenet", 96,       30,     5e-4,  0),
-    ("mobilenet_96",  "mobilenet",  96,       30,     3e-4,  0),
+    ("tiny_96",       "tiny",       96,       50,     1e-3,  0),
+    ("tiny_96_f2",    "tiny",       96,       50,     1e-3,  2),   # 2-frame lookahead
+    ("shuffle_96",    "shufflenet", 96,       50,     5e-4,  0),
+    ("mobilenet_96",  "mobilenet",  96,       50,     3e-4,  0),
 ]
 
 
@@ -52,8 +52,8 @@ def run_experiment(dataset, exp, out_dir):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--dataset", default="dataset")
-    p.add_argument("--out-dir", default="experiments")
+    p.add_argument("--dataset", default="../dataset_annotated_final")
+    p.add_argument("--out-dir", default="../models/output")
     p.add_argument("--only",    default=None, help="Run only this experiment name")
     args = p.parse_args()
 
