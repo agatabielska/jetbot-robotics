@@ -1,0 +1,24 @@
+name: pilotnet_anti
+target_type: forward_left
+preprocess_style: bgr_01            # PilotNet bez pretrainu: BGR /255 (jak baseline)
+input_size: 224
+label_shift: 2                      # ~200ms ahead (adresuje przedwczesny skręt)
+label_smoothing:
+  enabled: false
+anti_bias:
+  strategy: wsampler                # 5x oversampling rzadkich skrętów
+  n_bins: 7
+training:
+  batch_size: 64
+  num_workers: 4
+  epochs: 50
+  optimizer: adamw
+  lr: 1.0e-3
+  weight_decay: 1.0e-5
+  scheduler: cosine
+  loss_delta: 0.1
+  early_stopping_patience: 10
+split_csv: ../dataset_analysis_phase1/outputs/tables/split_B_holdout.csv
+blacklist_csv: ../dataset_analysis_phase1/outputs/tables/blacklist_candidates.csv
+export:
+  opset: 11
