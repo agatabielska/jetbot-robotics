@@ -48,15 +48,17 @@ class JetBotDataset(Dataset):
       - a folder    <timestamp>/     with images named %04d.jpg
     """
 
-    def __init__(self, root_dir: str, transform=None, future_offset: int = 0):
+    def __init__(self, root_dir: str, transform=None, future_offset: int = 0, flip_augment: bool = False):
         """
         Args:
             root_dir:      Path to the dataset/ folder.
             transform:     Albumentations transform pipeline.
             future_offset: If > 0, labels are taken N frames ahead (latency compensation).
+            flip_augment:  If True, randomly flip 50% of images horizontally and negate left label.
         """
         self.transform = transform
         self.future_offset = future_offset
+        self.flip_augment = flip_augment
         self.samples = []   # list of (image_path, forward, left)
 
         csv_files = glob.glob(os.path.join(root_dir, "*.csv"))
@@ -96,6 +98,10 @@ class JetBotDataset(Dataset):
         if self.transform:
             img = self.transform(image=img)["image"]           # C x H x W tensor
 
+        if self.flip_augment and torch.rand(1).item() < 0.5:
+            img = torch.flip(img, dims=[2])
+            left = -left
+
         label = torch.tensor([fwd, left], dtype=torch.float32)
         return img, label
 
@@ -134,6 +140,7 @@ def build_dataloaders(
         test_ds = None
 
     train_ds.dataset.transform = get_train_transforms(img_size)
+    train_ds.dataset.flip_augment = True
 
     val_dataset = JetBotDataset(
         root_dir=root_dir,
