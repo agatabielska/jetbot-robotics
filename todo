@@ -1,3 +1,0 @@
-- [ ] Rozwazyc ciagla jazde do przodu  i zmiany jedynie lewo praawo / szybka jazda jesli pewny
-- [x] Zapisane modelu do onnx
-- [x] Kwantyzacja modelu - lipton, use this on jetson trtexec --onnx=model.onnx --saveEngine=model.engine --fp16
