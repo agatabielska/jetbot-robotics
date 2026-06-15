@@ -9,7 +9,7 @@ __pycache__/
 data
 data/
 **/data/
-dataset_annotated/
+dataset_annotated_initial/
 
 # virtualenvs (multi-GB)
 .venv/
