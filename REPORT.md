@@ -5,6 +5,78 @@
 **During classes we created many models, they were almost all based on ResNet or PilotNet architectures.**
 
 
+## Final Model — ShuffleNetV2 ×0.5
+
+Our best-performing architecture is a fine-tuned **ShuffleNetV2 ×0.5** pretrained on ImageNet, implemented in `src/jetbot_models.py` as `ShuffleNetDriver`.
+
+### Architecture
+
+```
+Input: 96×96 RGB image
+  │
+  ▼
+ShuffleNetV2 ×0.5 backbone (pretrained, ImageNet)
+  │  Stage 1:  3×3 conv, stride 2  → 24 channels
+  │  Stage 2:  4× ShuffleNet units → 48 channels
+  │  Stage 3:  8× ShuffleNet units → 96 channels
+  │  Stage 4:  4× ShuffleNet units → 192 channels
+  │  Conv5:    1×1 conv            → 1024 channels
+  │
+  ▼
+AdaptiveAvgPool2d(1)   # global average pooling → (1024,)
+  │
+  ▼
+Flatten
+Dropout(p=0.3)
+Linear(1024 → 64)
+ReLU
+Linear(64 → 2)
+Tanh                   # outputs in [-1, 1]
+  │
+  ▼
+Output: [forward, left]
+```
+
+Each ShuffleNet unit splits its input channels in half, processes one half through depthwise separable convolutions, then concatenates and shuffles channels across groups — keeping computation low while preserving cross-channel information flow.
+
+### Key properties
+
+| Property | Value |
+|---|---|
+| Backbone | ShuffleNetV2 ×0.5 (ImageNet pretrained) |
+| Input size | 96×96 |
+| Trainable parameters | ~350k |
+| Output | `(forward, left)` via Tanh, range [−1, 1] |
+| Optimizer | AdamW, lr=5×10⁻⁴, weight decay=1×10⁻⁴ |
+| LR schedule | Cosine annealing, η_min=1×10⁻⁵ |
+| Loss | Huber (δ=0.5) |
+| Epochs | 50 |
+| Dropout | 0.3 (head only) |
+| Export | ONNX opset 11 |
+
+### Training data
+
+The model was first trained on the default course dataset (`put_jetbot_dataset/`). We then re-trained it on our own annotated data — `dataset_annotated_initial` (annotated the previous week) and `dataset_annotated_final` (annotated for the final class session). Models from both annotation rounds are kept in `models/` for comparison.
+
+### Anti-bias: horizontal flip
+
+The recorded driving data has an inherent left-turn bias due to the track layout. To counteract this, half of the training samples are horizontally flipped, with the `left` label sign negated accordingly. This artificially balances the left/right turn distribution without requiring additional data collection.
+
+### Deployment
+
+The exported ONNX model is run on the JetBot using one of four driving scripts in `src/`. The two best-performing ones are:
+
+**`bot_driving.py`** — minimal baseline driver. Captures a frame, runs inference, and sends the predicted `(forward, left)` directly to the motors. No smoothing or latency compensation.
+
+**`bot-driving-najlepsze.py`** — our primary deployment script, configured via `config-najlepsze.yml`. Adds three mechanisms on top of the basic loop:
+- **Fixed-delay buffer** (`latency_frames`): instead of acting on the newest prediction, the robot acts on a prediction made `N` frames ago. This compensates for camera and inference latency so that steering commands arrive at the right moment.
+- **Prediction averaging** (`avg_frames`): the applied command is the mean of the last `K` buffered predictions, smoothing out per-frame noise.
+- **Minimum forward speed** (`minimum_forward_value`): prevents the robot from stalling when the predicted forward value dips near zero.
+
+All three parameters are tunable in `config-najlepsze.yml` without modifying the script.
+
+---
+
 ## Other Approaches
 
 ### 1. Transfer Learning - ResNet18 Pretrained
@@ -127,7 +199,70 @@ All use WeightedRandomSampler on 7 `|left|` bins (except `dualhead_class_reg` wh
 
 All: lr=1e-3, AdamW, cosine schedule, batch_size=64, epochs=50, early stopping patience=10.
 
-### 8. Pure computer vision approach
+### 8. ShuffleNetV2 with heavy augmentation
+
+**Path**: `experiments/resized-jetbot/`
+
+Same ShuffleNetV2 ×0.5 architecture as the final model, but with a significantly expanded augmentation pipeline during training:
+
+| Added augmentation | Parameters |
+|---|---|
+| ShiftScaleRotate | shift=0.05, scale=0.1, rotate=5°, p=0.5 |
+| Perspective distortion | scale=(0.02, 0.05), p=0.3 |
+| Random crop + resize | crop to 90% height, p=0.3 |
+| RandomGamma | γ∈[70, 130], p=0.4 |
+| CLAHE | clip_limit=2.0, p=0.3 |
+| JPEG compression | quality∈[70, 100], p=0.2 |
+
+Despite the richer augmentation, this variant achieved **lower performance** than the final model. The additional geometric transforms likely distorted road geometry cues the model relies on for steering prediction.
+
+---
+
+### 9. TinyCNN
+
+**Path**: `src/jetbot_models.py`
+
+A lightweight custom CNN built from scratch — 5 convolutional blocks with stride-2 downsampling, followed by global average pooling and a small regression head.
+
+```
+Input 96×96 → Conv(3→16, s2) → Conv(16→32, s2) → Conv(32→64, s2)
+            → Conv(64→128, s2) → Conv(128→128, s2)
+            → AvgPool → Dropout → Linear(128→64) → Linear(64→2) → Tanh
+```
+
+| Property | Value |
+|---|---|
+| Parameters | ~200k |
+| Inference speed | ~3–5 ms on Jetson Nano |
+| Backbone | None (trained from scratch) |
+
+Fastest of the three models in `src/`, but without pretrained features it requires more data to reach comparable accuracy.
+
+---
+
+### 10. MobileNetV2
+
+**Path**: `src/jetbot_models.py`
+
+Pretrained MobileNetV2 backbone with the first 14 of 19 feature layers frozen, fine-tuning only the later layers and a custom head.
+
+```
+MobileNetV2 backbone (ImageNet, layers 0–13 frozen)
+  → AdaptiveAvgPool2d(1) → Flatten → Dropout
+  → Linear(1280→128) → ReLU → Linear(128→2) → Tanh
+```
+
+| Property | Value |
+|---|---|
+| Parameters | ~2.2M total, ~600k trainable |
+| Backbone | MobileNetV2 (ImageNet pretrained) |
+| LR | 3×10⁻⁴ |
+
+Highest parameter count of the three `src/` models. Best raw accuracy but slower than ShuffleNetV2 and more prone to overfitting on small datasets.
+
+---
+
+### 11. Pure computer vision approach
 
 Attempt to implement only binary thresholding and morphological operations in order to find the 
 center of the road. It was not great enough to be included in experiments in final repo.
