@@ -10,6 +10,7 @@ data
 data/
 **/data/
 dataset_annotated_initial/
+dataset_annotated_final/
 
 # virtualenvs (multi-GB)
 .venv/
