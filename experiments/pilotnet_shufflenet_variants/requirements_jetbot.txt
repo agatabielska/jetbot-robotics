@@ -1,0 +1,12 @@
+# Runtime na JetBocie (Python 3.6.9, JetPack 4.4, Tegra X1 ARMv8.0)
+# cv2 + jetbot library: preinstalled w fabrycznym obrazie JetBota
+numpy==1.19.5
+pyyaml==5.4.1
+onnxruntime==1.10.0
+sshkeyboard==2.3.1   # only for calibration/calibrate.py
+
+# UWAGA: jeśli 'Illegal instruction (core dumped)' przy import onnxruntime —
+# wheel z PyPI używa ARMv8.2+ intrinsics (Cortex-A57 na Tegra X1 to ARMv8.0).
+# Fix: użyj Jetson Zoo wheel: https://elinux.org/Jetson_Zoo#ONNX_Runtime
+#   wget https://nvidia.box.com/shared/static/<...>/onnxruntime_gpu-1.7.0-cp36-cp36m-linux_aarch64.whl
+#   pip3 install --user onnxruntime_gpu-1.7.0-cp36-cp36m-linux_aarch64.whl

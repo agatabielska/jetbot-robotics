@@ -2,6 +2,7 @@ import cv2
 import onnxruntime as rt
 import yaml
 import numpy as np
+from collections import deque
 from PUTDriver import PUTDriver, gstreamer_pipeline
 
 IMG_SIZE = 96
@@ -64,6 +65,14 @@ def main():
     _ = ai.predict(image)
     input('Robot is ready to ride. Press Enter to start...')
 
+    # latency_frames=0 → act on current frame's prediction immediately
+    # latency_frames=N → act on the prediction made N frames ago
+    # avg_frames=K    → average the K oldest ready predictions instead of just one
+    delay               = config['robot'].get('latency_frames', 0)
+    avg_frames          = config['robot'].get('avg_frames', 1)
+    min_forward         = config['robot'].get('minimum_forward_value', 0.0)
+    buffer              = deque()
+
     forward, left = 0.0, 0.0
     while True:
         print(f'Forward: {forward:.4f}\tLeft: {left:.4f}')
@@ -74,9 +83,15 @@ def main():
             print('No camera')
             break
 
-        result  = ai.predict(image)
-        forward = float(result[0])
-        left    = float(result[1])
+        result = ai.predict(image)
+        buffer.append((float(result[0]), float(result[1])))
+
+        if len(buffer) > delay:
+            n       = min(avg_frames, len(buffer))
+            forward = sum(buffer[i][0] for i in range(n)) / n
+            left    = sum(buffer[i][1] for i in range(n)) / n
+            forward = max(forward, min_forward)
+            buffer.popleft()
 
 
 if __name__ == '__main__':

@@ -1,0 +1,12 @@
+# Host-side (training) — zwalidowane na pipeline shufflenet drużynowego
+# (kopia z first_race_errors/resized-no-augmented-jetbot/requirements.txt)
+torch>=2.0.0
+torchvision>=0.15.0
+onnx>=1.14.0
+onnxruntime>=1.16.0
+albumentations>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+Pillow>=9.5.0
+opencv-python>=4.7.0
+PyYAML>=6.0

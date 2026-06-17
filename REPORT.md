@@ -2,7 +2,7 @@
 
 ## Agata Bielska, Jakub Radziejewski, Jakub Jęsiek, Kacper Kuźnik, Aleksander Hański
 
-**During classes we created many models, they were almost all based on ResNet or PilotNet architectures.**
+**During classes we created many models, spanning ResNet, PilotNet, ShuffleNetV2, and MobileNet architectures.**
 
 
 ## Final Model — ShuffleNetV2 ×0.5
@@ -80,7 +80,7 @@ Such combination allows to have smooth function, which later results in smoother
 
 ### Training data
 
-The model was first trained on the default course dataset (`put_jetbot_dataset/`). We then re-trained it on our own annotated data — `dataset_annotated_initial` (annotated the previous week) and `dataset_annotated_final` (annotated for the final class session). Models from both annotation rounds are kept in `models/` for comparison.
+The model was first trained on the default course dataset (`put_jetbot_dataset/`). We then re-trained it on our own annotated data - `dataset_annotated_initial` (annotated the previous week) and `dataset_annotated_final` (annotated for the final class session). Models from both annotation rounds are kept in `models/` for comparison.
 
 ### Anti-bias: horizontal flip
 
@@ -97,20 +97,22 @@ Nevertheless, we still wanted to make our model better.
 
 #### Robot zig-zagging
 
-When being on straight path, our model performed little turns. The cause of such behaviour is, by our thoughts, the delay caused by joystick when annotating data. This is why our hero, name of other groups in the lab, fought hard to re-annotate the data by hand. Initial experiment performed last week showed that the model indeed stopped zig-zagging, although by small algorithmical mistake it still was not perfect. As we have a lot of faith in the idea, we believe that today we will succeed with this extremely time consuming improvement and reach personal best time.
+When being on straight path, our model performed little turns. The cause of such behaviour is, by our thoughts, the delay caused by joystick when annotating data. This is why our hero, name of other groups in the lab, fought hard to re-annotate the data by hand. Initial experiment performed last week and experiment performed during last minutes of the last class showed that the model indeed stopped zig-zagging, although annotations and resulting model are still not perfect.
 
 ### Deployment
 
-The exported ONNX model is run on the JetBot using one of four driving scripts in `src/`. The two best-performing ones are:
+The exported ONNX model is run on the JetBot using driving script in `src/`.
 
-**`bot_driving.py`** — minimal baseline driver. Captures a frame, runs inference, and sends the predicted `(forward, left)` directly to the motors. No smoothing or latency compensation.
+We had a minimal baseline driver, but we did improve it.
 
-**`bot-driving-najlepsze.py`** — our primary deployment script, configured via `config-najlepsze.yml`. Adds three mechanisms on top of the basic loop:
+**`bot_driving.py`** - our final best deployment script, configured via `config.yml`. Adds three mechanisms on top of the basic loop:
 - **Fixed-delay buffer** (`latency_frames`): instead of acting on the newest prediction, the robot acts on a prediction made `N` frames ago. This compensates for camera and inference latency so that steering commands arrive at the right moment.
-- **Prediction averaging** (`avg_frames`): the applied command is the mean of the last `K` buffered predictions, smoothing out per-frame noise.
+- **Prediction averaging** (`avg_frames`): the applied command is the mean of the last `K` buffered predictions, smoothing out per-frame noise (although it does not really work well).
 - **Minimum forward speed** (`minimum_forward_value`): prevents the robot from stalling when the predicted forward value dips near zero.
 
-All three parameters are tunable in `config-najlepsze.yml` without modifying the script.
+All three additional parameters are tunable in `config.yml` without modifying the script.
+
+Basic driving script as well as our attempts to implement more sophisticated mechanisms in driving scripts can be found in `experiments/bot_driving_scripts`.
 
 ---
 
@@ -183,7 +185,7 @@ Even though the idea was to simplify the problem, it did not perform good, as it
 
 ### 3. Custom PilotNet
 
-**Path**: `experiments/Kacper-Solution/`
+**Path**: `experiments/custom_pilotnet_hsv_augmentation/`
 
 Custom PilotNet-inspired architecture:
 - 5 conv layers (32→32→64→128→128) with BatchNorm
@@ -216,7 +218,7 @@ Faithful NVIDIA PilotNet implementation:
 
 ### 5. 6 Variants of PilotNet-style backbone
 
-**Path**: `experiments/jakub_second_race/`
+**Path**: `experiments/pilotnet_shufflenet_variants/`
 
 All variants share: PilotNet-style backbone, AdamW, cosine LR, ONNX opset 11 export, runtime EMA smoothing (α=0.3).
 
@@ -235,7 +237,7 @@ All use WeightedRandomSampler on 7 `|left|` bins (except `dualhead_class_reg` wh
 
 ### 6. Other models
 
-**Path**: `experiments/jetbot_racing_bundle/`
+**Path**: `experiments/pilotnet_variants_bundle/`
 
 | Model | Key Idea | Anti-bias Strategy |
 |---|---|---|
@@ -250,7 +252,7 @@ All: lr=1e-3, AdamW, cosine schedule, batch_size=64, epochs=50, early stopping p
 
 ### 7. ShuffleNetV2 with heavy augmentation
 
-**Path**: `experiments/resized-jetbot/`
+**Path**: `experiments/shufflenet_heavy_augmentation/`
 
 Same ShuffleNetV2 ×0.5 architecture as the final model, but with a significantly expanded augmentation pipeline during training:
 
@@ -329,4 +331,4 @@ center of the road. It was not great enough to be included in experiments in fin
 | Inverse-frequency class weights | ResNet dual-head/dual-classifier | Applied to CrossEntropy loss |
 | Label shift (temporal lookahead) | `pilotnet_anti`, `pilotnet_fl_shift1` | Addresses late reactions in curves |
 | Horizontal flip + steering negation | Most experiments | Balances left/right turn distribution |
-| HSV augmentation + shadow cutout | Kacper-Solution | Improves lighting robustness |
+| HSV augmentation + shadow cutout | custom_pilotnet_hsv_augmentation | Improves lighting robustness |

@@ -1,9 +1,12 @@
 model:
-  path: '/home/jetbot/jetbot-robotics-main/resized-no-augmented-jetbot/experiments/shuffle_96/jetbot_shufflenet_96.onnx'
+  path: '/home/jetbot/jetbot-robotics/models/final-own-data/jetbot_shufflenet_96.onnx'
 
 robot:
-  max_speed: 0.2
-  max_steering: 0.7
+  max_speed: 0.24
+  max_steering: 0.5
   differential:
     left: 1.0
     right: 1.0
+  latency_frames: 5
+  avg_frames: 1
+  minimum_forward_value: 1.0
